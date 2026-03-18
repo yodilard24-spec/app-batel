@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#111111">
+<title>Batel Énergies — App Vendeurs</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+<script>
+function doLogin() {
+  var email = document.getElementById('loginEmail').value.trim();
+  var pass = document.getElementById('loginPass').value;
+  var err = document.getElementById('loginErr');
+  var btn = document.getElementById('loginBtn');
+  if(!email || !pass) { err.textContent = 'Renseignez email et mot de passe.'; return; }
+  btn.textContent = 'Connexion...'; btn.disabled = true; err.textContent = '';
+  var tries = 0;
+  function tryLogin() {
+    if(window._fbAuth) {
+      window._fbAuth.signInWithEmailAndPassword(email, pass).catch(function() {
+        err.textContent = 'Email ou mot de passe incorrect.';
+        btn.textContent = 'Se connecter'; btn.disabled = false;
+      });
+    } else if(tries < 30) {
+      tries++;
+      setTimeout(tryLogin, 200);
+    } else {
+      err.textContent = 'Erreur de chargement, rechargez la page.';
+      btn.textContent = 'Se connecter'; btn.disabled = false;
+    }
+  }
+  tryLogin();
+}
+function doLogout() { if(window._fbAuth) window._fbAuth.signOut(); }
+function openModal(id) { var el=document.getElementById(id); if(el) el.classList.add('open'); }
+function closeModal(id) { var el=document.getElementById(id); if(el) el.classList.remove('open'); }
+function openFab() {
+  var d = window._selectedDate || new Date().toISOString().split('T')[0];
+  document.getElementById('rdvDate').value = d;
+  openModal('modalRdv');
+}
+function goTo(s) { if(window._goTo) window._goTo(s); }
+function saveRdv() { if(window._saveRdv) window._saveRdv(); }
+function saveRapport() { if(window._saveRapport) window._saveRapport(); }
+function saveProfil() { if(window._saveProfil) window._saveProfil(); }
+function openRapport(id,prospect,adresse) {
+  window._currentRdvId = id;
+  window._currentRdvProspect = prospect;
+  var el = document.getElementById('rapportProspectName');
+  if(el) el.textContent = prospect || 'Prospect';
+  // Reset statut
+  document.querySelectorAll('.status-btn').forEach(function(b){ b.classList.remove('sel'); });
+  var def = document.querySelector('[data-val="visite"]');
+  if(def) def.classList.add('sel');
+  var st = document.getElementById('rapportStatut');
+  if(st) st.value = 'visite';
+  // Reset champs
+  ['rapportMontantHT','rapportMontantTTC','rapportObs','rapportNextDate','rapportNextHeure'].forEach(function(id){
+    var el = document.getElementById(id); if(el) el.value = '';
+  });
+  if(window._resetPhotos) window._resetPhotos();
+  openModal('modalRapport');
+}
+function deleteRdv(i) { if(window._deleteRdv) window._deleteRdv(i); }
+function calcTTC() { if(window._calcTTC) window._calcTTC(); }
+function addPhoto(i,el) { if(window._addPhoto) window._addPhoto(i,el); }
+function addPhotoDoc(t,el) { if(window._addPhotoDoc) window._addPhotoDoc(t,el); }
+function callTel(btn) { var t=btn.getAttribute('data-tel'); if(t) window.location.href='tel:'+t; }
+</script>
+<!-- Firebase CDN (non-module) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+:root{--bg:#F5F5F5;--surface:#fff;--border:rgba(0,0,0,0.08);--accent:#F5A800;--accent2:#CC8800;--green:#00C853;--red:#FF5252;--orange:#FF9800;--text:#1A1A1A;--text2:rgba(0,0,0,0.5);--text3:rgba(0,0,0,0.25);--radius:16px;}
+html,body{height:100%;width:100%;overflow:hidden;background:var(--bg);font-family:'Outfit',sans-serif;color:var(--text);overscroll-behavior:none;}
+
+/* LOGIN */
+#loginScreen{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;padding:32px 24px;background:#111;}
+.login-logo{font-size:3rem;margin-bottom:8px;}
+.login-title{font-size:1.4rem;font-weight:800;color:white;margin-bottom:4px;}
+.login-sub{font-size:0.85rem;color:rgba(255,255,255,0.4);margin-bottom:40px;}
+.login-card{background:white;border-radius:24px;padding:28px;width:100%;max-width:360px;}
+.login-card h3{font-size:1rem;font-weight:700;margin-bottom:20px;}
+.login-input{width:100%;padding:14px 16px;border:1.5px solid #EEE;border-radius:12px;font-size:0.95rem;font-family:'Outfit',sans-serif;outline:none;margin-bottom:12px;background:#FAFAFA;}
+.login-input:focus{border-color:var(--accent);}
+.login-btn{width:100%;padding:15px;background:linear-gradient(135deg,#F5A800,#CC8800);border:none;border-radius:12px;font-family:'Outfit',sans-serif;font-size:1rem;font-weight:700;color:#111;cursor:pointer;}
+.login-btn:disabled{opacity:0.6;}
+.login-err{font-size:0.8rem;color:var(--red);margin-top:10px;text-align:center;min-height:18px;}
+
+/* APP */
+#appShell{display:none;flex-direction:column;height:100vh;height:100dvh;max-width:430px;margin:0 auto;}
+.topbar{background:#111;padding:14px 20px 12px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.topbar-logo{font-size:1.1rem;font-weight:800;color:var(--accent);}
+.topbar-user{display:flex;align-items:center;gap:8px;}
+.topbar-avatar{width:32px;height:32px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;color:#111;}
+#navUserName{font-size:0.8rem;color:rgba(255,255,255,0.7);}
+.topbar-logout{font-size:1rem;cursor:pointer;color:rgba(255,255,255,0.4);padding:4px;background:none;border:none;}
+
+/* SCREENS */
+.screens-container{flex:1;overflow:hidden;position:relative;}
+.screen{position:absolute;inset:0;overflow-y:auto;padding:16px;display:none;flex-direction:column;gap:14px;}
+.screen.active{display:flex;}
+.screen::-webkit-scrollbar{display:none;}
+
+/* BOTTOM NAV */
+.bottom-nav{background:white;border-top:1px solid var(--border);display:flex;padding:8px 0 calc(8px + env(safe-area-inset-bottom));flex-shrink:0;}
+.nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 4px;cursor:pointer;color:var(--text3);}
+.nav-item.active{color:var(--accent);}
+.nav-icon{font-size:1.3rem;}
+.nav-label{font-size:0.6rem;font-weight:600;}
+
+/* CARDS */
+.section-title{font-size:0.7rem;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.08em;}
+.card{background:var(--surface);border-radius:var(--radius);padding:16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);}
+.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.stat-card{background:var(--surface);border-radius:14px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,0.06);}
+.stat-val{font-size:1.8rem;font-weight:800;color:var(--accent);line-height:1;}
+.stat-lbl{font-size:0.7rem;color:var(--text2);margin-top:4px;}
+
+/* RDV */
+.rdv-card{background:var(--surface);border-radius:14px;padding:14px 16px;display:flex;align-items:center;gap:12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);}
+.rdv-time{font-size:0.85rem;font-weight:700;color:var(--accent);min-width:42px;}
+.rdv-info{flex:1;}
+.rdv-name{font-size:0.9rem;font-weight:600;}
+.rdv-addr{font-size:0.75rem;color:var(--text2);}
+.tag{font-size:0.6rem;font-weight:600;background:rgba(245,168,0,0.12);color:var(--accent2);padding:2px 7px;border-radius:100px;display:inline-block;margin-top:4px;}
+.rdv-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+.dot-planifie{background:#888;}.dot-visite{background:var(--accent);}.dot-signe{background:var(--green);}.dot-perdu{background:var(--red);}.dot-relance{background:var(--orange);}
+
+/* DATE STRIP */
+.date-strip{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;}
+.date-strip::-webkit-scrollbar{display:none;}
+.date-chip{min-width:52px;height:64px;border-radius:14px;background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;border:1.5px solid transparent;flex-shrink:0;}
+.date-chip.active{background:#111;border-color:var(--accent);}
+.dc-day{font-size:0.6rem;font-weight:600;color:var(--text2);}
+.date-chip.active .dc-day{color:rgba(255,255,255,0.5);}
+.dc-num{font-size:1.1rem;font-weight:700;}
+.date-chip.active .dc-num{color:var(--accent);}
+
+/* HISTORIQUE */
+.histo-card{background:var(--surface);border-radius:14px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);}
+.histo-header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px;}
+.histo-name{font-size:0.9rem;font-weight:600;}
+.histo-meta{font-size:0.72rem;color:var(--text2);margin-top:2px;}
+.histo-obs{font-size:0.8rem;color:var(--text2);line-height:1.4;}
+.histo-montant{font-size:0.8rem;font-weight:700;color:var(--green);margin-top:6px;}
+.badge{font-size:0.65rem;font-weight:700;padding:3px 9px;border-radius:100px;white-space:nowrap;}
+
+/* PROFIL */
+.profil-header{background:#111;border-radius:var(--radius);padding:24px;display:flex;flex-direction:column;align-items:center;gap:10px;}
+.profil-avatar{width:64px;height:64px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:1.8rem;font-weight:800;color:#111;}
+
+/* FORMS */
+.form-group{display:flex;flex-direction:column;gap:6px;}
+.form-label{font-size:0.72rem;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.05em;}
+.form-input{padding:13px 14px;border:1.5px solid var(--border);border-radius:12px;font-size:0.9rem;font-family:'Outfit',sans-serif;background:var(--surface);outline:none;color:var(--text);width:100%;}
+.form-input:focus{border-color:var(--accent);}
+textarea.form-input{resize:none;}
+
+/* BUTTONS */
+.btn-primary{width:100%;padding:15px;background:linear-gradient(135deg,#F5A800,#CC8800);border:none;border-radius:14px;font-family:'Outfit',sans-serif;font-size:1rem;font-weight:700;color:#111;cursor:pointer;}
+.btn-secondary{padding:10px 18px;background:var(--surface);border:1.5px solid var(--border);border-radius:12px;font-family:'Outfit',sans-serif;font-size:0.85rem;font-weight:600;cursor:pointer;color:var(--text);}
+.btn-icon{width:34px;height:34px;border-radius:50%;background:#F5F5F5;border:none;cursor:pointer;font-size:0.9rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+#fabBtn{position:fixed;bottom:calc(80px + env(safe-area-inset-bottom));right:20px;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#F5A800,#CC8800);border:none;font-size:1.6rem;cursor:pointer;box-shadow:0 4px 16px rgba(245,168,0,0.4);display:none;align-items:center;justify-content:center;z-index:50;color:#111;font-weight:300;}
+
+/* MODALS */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100;display:none;align-items:flex-end;}
+.modal-overlay.open{display:flex!important;}
+.modal-sheet{background:white;border-radius:24px 24px 0 0;padding:20px 20px calc(20px + env(safe-area-inset-bottom));width:100%;max-height:88vh;overflow-y:auto;display:flex;flex-direction:column;gap:14px;}
+.modal-sheet::-webkit-scrollbar{display:none;}
+.modal-handle{width:36px;height:4px;background:#EEE;border-radius:2px;margin:0 auto -4px;}
+.modal-title{font-size:1rem;font-weight:700;}
+.status-buttons{display:flex;gap:8px;flex-wrap:wrap;}
+.status-btn{padding:8px 14px;border-radius:100px;border:1.5px solid var(--border);font-size:0.78rem;font-weight:600;cursor:pointer;background:var(--surface);font-family:'Outfit',sans-serif;}
+.status-btn.sel{border-color:var(--accent);background:rgba(245,168,0,0.12);color:var(--accent2);}
+
+/* GREETING */
+.greeting{background:linear-gradient(135deg,#111,#2a2a2a);border-radius:var(--radius);padding:18px 20px;color:white;}
+.greeting-sub{font-size:0.75rem;color:rgba(255,255,255,0.4);}
+.greeting-name{font-size:1.3rem;font-weight:800;color:var(--accent);}
+.greeting-date{font-size:0.75rem;color:rgba(255,255,255,0.3);margin-top:4px;}
+
+/* EMPTY */
+.empty-state{text-align:center;color:var(--text3);font-size:0.85rem;padding:32px 0;}
+
+/* WEBHOOK INFO */
+.webhook-info{background:rgba(245,168,0,0.08);border:1px solid rgba(245,168,0,0.2);border-radius:10px;padding:10px 12px;font-size:0.72rem;color:var(--text2);line-height:1.5;}
+
+/* PHOTOS */
+.photo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+.photo-slot{aspect-ratio:1;border-radius:12px;border:1.5px dashed var(--border);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;position:relative;background:var(--surface);}
+.photo-slot.filled{border-style:solid;}
+.photo-slot img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0;}
+.photo-slot input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+.photo-add-icon{font-size:1.4rem;color:var(--text3);}
+.photo-add-label{font-size:0.6rem;color:var(--text3);margin-top:4px;}
+.photo-remove{position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;font-size:0.65rem;color:white;z-index:2;cursor:pointer;border:none;}
+/* TOAST */
+#toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%) translateY(20px);background:#111;color:white;padding:10px 20px;border-radius:100px;font-size:0.85rem;font-weight:600;opacity:0;transition:all 0.3s;z-index:999;white-space:nowrap;pointer-events:none;}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginScreen">
+  <div class="login-logo">⚡</div>
+  <div class="login-title">Batel Énergies</div>
+  <div class="login-sub">Application Vendeurs</div>
+  <div class="login-card">
+    <h3>Connexion</h3>
+    <input id="loginEmail" class="login-input" type="email" placeholder="Email" autocomplete="email">
+    <input id="loginPass" class="login-input" type="password" placeholder="Mot de passe" autocomplete="current-password">
+    <button id="loginBtn" class="login-btn" onclick="doLogin()">Se connecter</button>
+    <div id="loginErr" class="login-err"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="appShell">
+  <div class="topbar">
+    <div class="topbar-logo">⚡ Batel</div>
+    <div class="topbar-user">
+      <div class="topbar-avatar">V</div>
+      <span id="navUserName">Vendeur</span>
+      <button class="topbar-logout" onclick="doLogout()">⏻</button>
+    </div>
+  </div>
+
+  <div class="screens-container">
+    <!-- HOME -->
+    <div id="screen-home" class="screen active">
+      <div class="greeting">
+        <div class="greeting-sub">Bonjour,</div>
+        <div class="greeting-name" id="homeUserName">Vendeur</div>
+        <div class="greeting-date" id="homeDate"></div>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-val" id="statVisites">0</div><div class="stat-lbl">Visites totales</div></div>
+        <div class="stat-card"><div class="stat-val" id="statSignes">0</div><div class="stat-lbl">Dossiers signés</div></div>
+        <div class="stat-card"><div class="stat-val" id="statCA">0€</div><div class="stat-lbl">CA généré</div></div>
+        <div class="stat-card"><div class="stat-val" id="statTaux">0%</div><div class="stat-lbl">Taux conversion</div></div>
+      </div>
+      <div class="section-title">RDV du jour</div>
+      <div id="homeRdvList" style="display:flex;flex-direction:column;gap:10px;"></div>
+    </div>
+
+    <!-- AGENDA -->
+    <div id="screen-agenda" class="screen">
+      <div class="date-strip" id="dateStrip"></div>
+      <div id="agendaList" style="display:flex;flex-direction:column;gap:10px;"></div>
+    </div>
+
+    <!-- HISTORIQUE -->
+    <div id="screen-historique" class="screen">
+      <div class="section-title">Mes rapports</div>
+      <div id="historiqueList" style="display:flex;flex-direction:column;gap:10px;"></div>
+    </div>
+
+    <!-- PROFIL -->
+    <div id="screen-profil" class="screen">
+      <div class="profil-header">
+        <div class="profil-avatar">⚡</div>
+        <div style="font-size:1.1rem;font-weight:700;color:white;" id="profilNomDisplay"></div>
+        <div style="font-size:0.75rem;color:rgba(255,255,255,0.4);" id="profilEmail"></div>
+      </div>
+      <div class="card" style="display:flex;flex-direction:column;gap:14px;">
+        <div class="form-group"><label class="form-label">Nom complet</label><input id="profilNom" class="form-input" type="text"></div>
+        <div class="form-group"><label class="form-label">Zone</label><input id="profilZone" class="form-input" type="text" value="Gironde"></div>
+        <div class="form-group">
+          <label class="form-label">Webhook Make</label>
+          <input id="profilWebhook" class="form-input" type="url" placeholder="https://hook.eu1.make.com/...">
+          <div class="webhook-info">🔗 URL Make pour synchroniser avec GoHighLevel</div>
+        </div>
+        <button class="btn-primary" onclick="saveProfil()">💾 Enregistrer</button>
+        <button class="btn-secondary" style="width:100%;color:var(--red);" onclick="doLogout()">⏻ Déconnexion</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom-nav">
+    <div class="nav-item active" data-screen="home"><span class="nav-icon">🏠</span><span class="nav-label">Accueil</span></div>
+    <div class="nav-item" data-screen="agenda"><span class="nav-icon">📅</span><span class="nav-label">Agenda</span></div>
+    <div class="nav-item" data-screen="historique"><span class="nav-icon">📊</span><span class="nav-label">Historique</span></div>
+    <div class="nav-item" data-screen="profil"><span class="nav-icon">👤</span><span class="nav-label">Profil</span></div>
+  </div>
+</div>
+
+<!-- FAB -->
+<button id="fabBtn" onclick="openFab()">＋</button>
+
+<!-- MODAL RDV -->
+<div class="modal-overlay" id="modalRdv">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">📅 Nouveau RDV</div>
+    <div class="form-group"><label class="form-label">Prospect *</label><input id="rdvProspect" class="form-input" type="text" placeholder="Nom Prénom"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div class="form-group"><label class="form-label">Date *</label><input id="rdvDate" class="form-input" type="date"></div>
+      <div class="form-group"><label class="form-label">Heure *</label><input id="rdvHeure" class="form-input" type="time" value="09:00"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div class="form-group"><label class="form-label">Type</label>
+        <select id="rdvType" class="form-input">
+          <option value="pac">🌡️ PAC</option>
+          <option value="solaire">☀️ Solaire</option>
+          <option value="pac+solaire">⚡ PAC+Solaire</option>
+          <option value="sav">🔧 SAV</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">Adresse</label><input id="rdvAdresse" class="form-input" type="text" placeholder="Adresse..."></div>
+    <div class="form-group"><label class="form-label">Téléphone</label><input id="rdvTel" class="form-input" type="tel" placeholder="06 XX XX XX XX"></div>
+    <button class="btn-primary" onclick="saveRdv()">✅ Ajouter le RDV</button>
+    <button class="btn-secondary" style="width:100%;" onclick="closeModal(&apos;modalRdv&apos;)">Annuler</button>
+  </div>
+</div>
+
+<!-- MODAL RAPPORT -->
+<div class="modal-overlay" id="modalRapport">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">📝 Rapport de visite</div>
+    <div id="rapportProspectName" style="font-size:1rem;color:var(--accent);font-weight:700;"></div>
+    <div class="form-group">
+      <label class="form-label">Statut</label>
+      <div class="status-buttons">
+        <button class="status-btn sel" data-val="visite">✅ Visité</button>
+        <button class="status-btn" data-val="signe">🏆 Signé</button>
+        <button class="status-btn" data-val="relance">🔁 Relance</button>
+        <button class="status-btn" data-val="perdu">❌ Perdu</button>
+      </div>
+      <input type="hidden" id="rapportStatut" value="visite">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div class="form-group"><label class="form-label">Type</label>
+        <select id="rapportType" class="form-input">
+          <option value="pac">PAC</option><option value="solaire">Solaire</option>
+          <option value="pac+solaire">PAC+Solaire</option><option value="sav">SAV</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Montant HT (€)</label><input id="rapportMontantHT" class="form-input" type="number" placeholder="0" oninput="calcTTC()"></div>
+      <div class="form-group"><label class="form-label">TVA</label>
+        <select id="rapportTVA" class="form-input" onchange="calcTTC()">
+          <option value="5.5">5.5% (PAC / Solaire)</option>
+          <option value="10">10%</option>
+          <option value="20">20%</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Montant TTC (€)</label>
+      <input id="rapportMontantTTC" class="form-input" type="number" placeholder="0">
+    </div>
+    <div class="form-group"><label class="form-label">Observations</label><textarea id="rapportObs" class="form-input" rows="3" placeholder="Notes..."></textarea></div>
+    <div class="form-group">
+      <label class="form-label">Prochain RDV</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <input id="rapportNextDate" class="form-input" type="date">
+        <input id="rapportNextHeure" class="form-input" type="time">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Photos (max 6)</label>
+      <div class="photo-grid" id="photoGrid">
+        <div class="photo-slot" id="slot0"><span class="photo-add-icon">📷</span><span class="photo-add-label">Photo 1</span><input type="file" accept="image/*" capture="environment" onchange="addPhoto(0,this)"></div>
+        <div class="photo-slot" id="slot1"><span class="photo-add-icon">📷</span><span class="photo-add-label">Photo 2</span><input type="file" accept="image/*" capture="environment" onchange="addPhoto(1,this)"></div>
+        <div class="photo-slot" id="slot2"><span class="photo-add-icon">📷</span><span class="photo-add-label">Photo 3</span><input type="file" accept="image/*" capture="environment" onchange="addPhoto(2,this)"></div>
+        <div class="photo-slot" id="slot3"><span class="photo-add-icon">📷</span><span class="photo-add-label">Photo 4</span><input type="file" accept="image/*" capture="environment" onchange="addPhoto(3,this)"></div>
+        <div class="photo-slot" id="slot4"><span class="photo-add-icon">📷</span><span class="photo-add-label">Photo 5</span><input type="file" accept="image/*" capture="environment" onchange="addPhoto(4,this)"></div>
+        <div class="photo-slot" id="slot5"><span class="photo-add-icon">📷</span><span class="photo-add-label">Photo 6</span><input type="file" accept="image/*" capture="environment" onchange="addPhoto(5,this)"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px;">
+        <div>
+          <div style="font-size:0.7rem;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">📄 Devis signé</div>
+          <div class="photo-slot" id="slotDevis" style="height:90px;">
+            <span class="photo-add-icon">📄</span>
+            <span class="photo-add-label">Photo devis</span>
+            <input type="file" accept="image/*" capture="environment" onchange="addPhotoDoc('devis',this)">
+          </div>
+        </div>
+        <div>
+          <div style="font-size:0.7rem;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">💳 Acompte</div>
+          <div class="photo-slot" id="slotAcompte" style="height:90px;">
+            <span class="photo-add-icon">💳</span>
+            <span class="photo-add-label">Photo acompte</span>
+            <input type="file" accept="image/*" capture="environment" onchange="addPhotoDoc('acompte',this)">
+          </div>
+        </div>
+      </div>
+    </div>
+    <button class="btn-primary" onclick="saveRapport()">💾 Enregistrer</button>
+    <button class="btn-secondary" style="width:100%;" onclick="closeModal(&apos;modalRapport&apos;)">Annuler</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- MODAL VOIR/MODIFIER RAPPORT -->
+<div class="modal-overlay" id="modalVoirRapport" onclick="if(event.target===this)closeModal('modalVoirRapport')">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div class="modal-title">📋 Rapport de visite</div>
+      <button class="btn-secondary" style="font-size:0.75rem;padding:6px 12px;" onclick="activerEdition()">✏️ Modifier</button>
+    </div>
+    <div id="voirRapportProspect" style="font-size:1rem;color:var(--accent);font-weight:700;"></div>
+
+    <div class="form-group"><label class="form-label">Statut</label>
+      <div class="status-buttons" id="voirStatusBtns">
+        <button class="status-btn" data-val="visite" onclick="setVoirStatut(this,'visite')">✅ Visité</button>
+        <button class="status-btn" data-val="signe" onclick="setVoirStatut(this,'signe')">🏆 Signé</button>
+        <button class="status-btn" data-val="relance" onclick="setVoirStatut(this,'relance')">🔁 Relance</button>
+        <button class="status-btn" data-val="perdu" onclick="setVoirStatut(this,'perdu')">❌ Perdu</button>
+      </div>
+      <input type="hidden" id="voirStatut">
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div class="form-group"><label class="form-label">Type</label>
+        <select id="voirType" class="form-input">
+          <option value="pac">PAC</option>
+          <option value="solaire">Solaire</option>
+          <option value="pac+solaire">PAC+Solaire</option>
+          <option value="sav">SAV</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">TVA</label>
+        <select id="voirTVA" class="form-input" onchange="calcVoirTTC()">
+          <option value="5.5">5.5%</option>
+          <option value="10">10%</option>
+          <option value="20">20%</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <div class="form-group"><label class="form-label">Montant HT (€)</label>
+        <input id="voirMontantHT" class="form-input" type="number" placeholder="0" oninput="calcVoirTTC()">
+      </div>
+      <div class="form-group"><label class="form-label">Montant TTC (€)</label>
+        <input id="voirMontantTTC" class="form-input" type="number" placeholder="0">
+      </div>
+    </div>
+
+    <div class="form-group"><label class="form-label">Observations</label>
+      <textarea id="voirObs" class="form-input" rows="3" placeholder="Notes..."></textarea>
+    </div>
+
+    <div class="form-group"><label class="form-label">Date rapport</label>
+      <input id="voirDate" class="form-input" type="date">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Photos du rapport</label>
+      <div id="voirPhotosContainer" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;"></div>
+    </div>
+    <button class="btn-primary" id="voirSaveBtn" style="display:none;" onclick="sauvegarderModif()">💾 Enregistrer les modifications</button>
+    <button class="btn-secondary" style="width:100%;color:var(--red);" onclick="supprimerRapport()">🗑 Supprimer ce rapport</button>
+    <button class="btn-secondary" style="width:100%;" onclick="closeModal('modalVoirRapport')">Fermer</button>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════
+// FIREBASE CONFIG
+// ══════════════════════════════════════
+var firebaseConfig = {
+  apiKey: "AIzaSyCnpN-PLmO3Q7-lx2eaPqpgTu2nXutpNc8",
+  authDomain: "batel-nergie-69bbd.firebaseapp.com",
+  projectId: "batel-nergie-69bbd",
+  storageBucket: "batel-nergie-69bbd.firebasestorage.app",
+  messagingSenderId: "401910621732",
+  appId: "1:401910621732:web:cf73f6308dafd2b8ae9ab1"
+};
+firebase.initializeApp(firebaseConfig);
+var auth = firebase.auth();
+var db = firebase.firestore();
+
+// ══════════════════════════════════════
+// STATE
+// ══════════════════════════════════════
+var currentUser = null;
+var currentVendeur = null;
+var selectedDate = new Date().toISOString().split('T')[0]; window._selectedDate = selectedDate;
+var currentRdvId = null;
+var currentRdvProspect = null;
+var MAKE_WEBHOOK = 'https://hook.eu1.make.com/uh83g9uge5emw6daq1qxct4fju7p51nx';
+var CLOUDINARY_CLOUD = 'dbco5atrv';
+var CLOUDINARY_PRESET = 'batel-uploads';
+var CLOUDINARY_URL = 'https://api.cloudinary.com/v1_1/' + CLOUDINARY_CLOUD + '/image/upload';
+
+// Exposer fonctions internes
+window._goTo = function(s){ goTo(s); };
+window._saveRdv = function(){ saveRdv(); };
+window._saveRapport = function(){ saveRapport(); };
+window._saveProfil = function(){ saveProfil(); };
+window._openRapport = function(i,p,a){ openRapport(i,p,a); };
+window._deleteRdv = function(i){ deleteRdv(i); };
+window._calcTTC = function(){ calcTTC(); };
+window._addPhoto = function(i,el){ addPhoto(i,el); };
+window._addPhotoDoc = function(t,el){ addPhotoDoc(t,el); };
+
+// ══════════════════════════════════════
+// DATE
+// ══════════════════════════════════════
+var JOURS = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
+var MOIS = ['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc'];
+var now = new Date();
+document.getElementById('homeDate').textContent = JOURS[now.getDay()] + ' ' + now.getDate() + ' ' + MOIS[now.getMonth()] + ' ' + now.getFullYear();
+
+// ══════════════════════════════════════
+// TOAST
+// ══════════════════════════════════════
+function showToast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); }, 2800);
+}
+
+// ══════════════════════════════════════
+// NAV
+// ══════════════════════════════════════
+function goTo(screen) {
+  document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('active'); });
+  document.querySelectorAll('.nav-item').forEach(function(n){ n.classList.remove('active'); });
+  document.getElementById('screen-' + screen).classList.add('active');
+  var ni = document.querySelector('[data-screen="' + screen + '"]');
+  if(ni) ni.classList.add('active');
+  document.getElementById('fabBtn').style.display = screen === 'agenda' ? 'flex' : 'none';
+  if(screen === 'home') loadHome();
+  if(screen === 'agenda') loadAgenda();
+  if(screen === 'historique') loadHistorique();
+  if(screen === 'profil') loadProfil();
+}
+
+document.querySelectorAll('.nav-item').forEach(function(item) {
+  item.addEventListener('click', function() { goTo(this.getAttribute('data-screen')); });
+});
+
+// ══════════════════════════════════════
+// MODALS
+// ══════════════════════════════════════
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+function openFab() { document.getElementById('rdvDate').value = selectedDate; openModal('modalRdv'); }
+document.getElementById('modalRdv').addEventListener('click', function(e) { if(e.target === this) closeModal('modalRdv'); });
+document.getElementById('modalRapport').addEventListener('click', function(e) { if(e.target === this) closeModal('modalRapport'); });
+
+// Statut buttons
+document.querySelectorAll('.status-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.status-btn').forEach(function(b){ b.classList.remove('sel'); });
+    this.classList.add('sel');
+    document.getElementById('rapportStatut').value = this.getAttribute('data-val');
+  });
+});
+
+// ══════════════════════════════════════
+// AUTH
+// ══════════════════════════════════════
+auth.onAuthStateChanged(function(user) {
+  if(user) {
+    currentUser = user;
+    db.collection('vendeurs').doc(user.uid).get().then(function(snap) {
+      if(snap.exists) {
+        currentVendeur = snap.data();
+      } else {
+        currentVendeur = { nom: user.email.split('@')[0], email: user.email, zone: 'Gironde' };
+        db.collection('vendeurs').doc(user.uid).set(currentVendeur);
+      }
+      document.getElementById('navUserName').textContent = currentVendeur.nom || 'Vendeur';
+      document.getElementById('homeUserName').textContent = (currentVendeur.nom || 'Vendeur').split(' ')[0];
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('appShell').style.display = 'flex';
+      loadHome();
+    });
+  } else {
+    currentUser = null;
+    document.getElementById('loginScreen').style.display = 'flex';
+    document.getElementById('appShell').style.display = 'none';
+    document.getElementById('fabBtn').style.display = 'none';
+  }
+});
+
+
+// Enter key sur login
+document.getElementById('loginPass').addEventListener('keydown', function(e) {
+  if(e.key === 'Enter') doLogin();
+});
+
+function doLogout() { auth.signOut(); }
+
+function callTel(btn) {
+  var tel = btn.getAttribute('data-tel');
+  if(tel) window.location.href = 'tel:' + tel;
+}
+
+function deleteRdv(id) {
+  if(!confirm('Supprimer ce RDV ?')) return;
+  db.collection('vendeurs').doc(currentUser.uid).collection('rdvs').doc(id).delete().then(function() {
+    loadRdvsDate(selectedDate); showToast('RDV supprimé');
+  });
+}
+
+// ══════════════════════════════════════
+// HOME
+// ══════════════════════════════════════
+function loadHome() {
+  if(!currentUser) return;
+  var today = new Date().toISOString().split('T')[0];
+  db.collection('vendeurs').doc(currentUser.uid).collection('rdvs')
+    .where('date','==',today).get().then(function(snap) {
+      var list = document.getElementById('homeRdvList');
+      list.innerHTML = '';
+      if(snap.empty) { list.innerHTML = '<div class="empty-state">Aucun RDV aujourd\'hui 🎉</div>'; return; }
+      snap.forEach(function(d) {
+        var r = d.data();
+        var card = document.createElement('div');
+        card.className = 'rdv-card';
+        card.style.cursor = 'pointer';
+        card.innerHTML = '<div class="rdv-time">' + (r.heure||'--:--') + '</div>'
+          + '<div class="rdv-info"><div class="rdv-name">' + (r.prospect||'Prospect') + '</div>'
+          + '<div class="rdv-addr">' + (r.adresse||'') + '</div>'
+          + '<span class="tag">' + (r.type||'PAC').toUpperCase() + '</span></div>'
+          + '<div class="rdv-dot dot-' + (r.statut||'planifie') + '"></div>';
+        (function(did, rp, ra){ card.addEventListener('click', function() { openRapport(did, rp, ra); }); })(d.id, r.prospect, r.adresse||'');
+        list.appendChild(card);
+      });
+    });
+
+  db.collection('vendeurs').doc(currentUser.uid).collection('rapports').get().then(function(snap) {
+    var total=0, signes=0, ca=0;
+    snap.forEach(function(d) {
+      var r = d.data(); total++;
+      if(r.statut==='signe') { signes++; ca += parseFloat(r.montant||0); }
+    });
+    document.getElementById('statVisites').textContent = total;
+    document.getElementById('statSignes').textContent = signes;
+    document.getElementById('statCA').textContent = ca>0 ? (ca/1000).toFixed(1)+'k€' : '0€';
+    document.getElementById('statTaux').textContent = total>0 ? Math.round(signes/total*100)+'%' : '0%';
+  });
+}
+
+// ══════════════════════════════════════
+// AGENDA
+// ══════════════════════════════════════
+function loadAgenda() {
+  if(!currentUser) return;
+  var strip = document.getElementById('dateStrip');
+  strip.innerHTML = '';
+  for(var i=-1; i<=6; i++) {
+    var d = new Date(); d.setDate(d.getDate()+i);
+    var iso = d.toISOString().split('T')[0];
+    var chip = document.createElement('div');
+    chip.className = 'date-chip' + (iso===selectedDate?' active':'');
+    chip.innerHTML = '<span class="dc-day">' + JOURS[d.getDay()] + '</span><span class="dc-num">' + d.getDate() + '</span>';
+    chip.addEventListener('click', (function(date){ return function(){ selectedDate=date; loadAgenda(); }; })(iso));
+    strip.appendChild(chip);
+  }
+  loadRdvsDate(selectedDate);
+}
+
+function loadRdvsDate(date) {
+  if(!currentUser) return;
+  db.collection('vendeurs').doc(currentUser.uid).collection('rdvs')
+    .where('date','==',date).get().then(function(snap) {
+      var list = document.getElementById('agendaList');
+      list.innerHTML = '';
+      if(snap.empty) { list.innerHTML = '<div class="empty-state">Aucun RDV ce jour</div>'; return; }
+      snap.forEach(function(d) {
+        var r = d.data();
+        var card = document.createElement('div');
+        card.className = 'rdv-card';
+        var did = d.id;
+        var rprospect = (r.prospect||'').replace(/'/g, '');
+        var radresse = (r.adresse||'').replace(/'/g, '');
+        var rtel = (r.tel||'');
+        card.innerHTML = '<div class="rdv-time">' + r.heure + '</div>'
+          + '<div class="rdv-info"><div class="rdv-name">' + r.prospect + '</div>'
+          + '<div class="rdv-addr">' + (r.adresse||'') + '</div>'
+          + '<span class="tag">' + (r.type||'PAC').toUpperCase() + '</span></div>'
+          + '<div style="display:flex;gap:6px;">'
+          + '<button class="btn-icon" onclick="callTel(this)" data-tel="' + rtel + '">📞</button>'
+          + '<button class="btn-icon" onclick="openRapport(this.dataset.id,this.dataset.prospect,this.dataset.adresse)" data-id="' + did + '" data-prospect="' + rprospect + '" data-adresse="' + radresse + '">📝</button>'
+          + '<button class="btn-icon" style="background:rgba(255,82,82,0.1);" onclick="deleteRdv(this.dataset.id)" data-id="' + did + '">🗑</button>'
+          + '</div>';
+        list.appendChild(card);
+      });
+    });
+}
+
+function saveRdv() {
+  var prospect = document.getElementById('rdvProspect').value.trim();
+  var heure = document.getElementById('rdvHeure').value;
+  if(!prospect || !heure) { showToast('Renseignez prospect et heure'); return; }
+  db.collection('vendeurs').doc(currentUser.uid).collection('rdvs').add({
+    prospect: prospect,
+    heure: heure,
+    adresse: document.getElementById('rdvAdresse').value.trim(),
+    tel: document.getElementById('rdvTel').value.trim(),
+    type: document.getElementById('rdvType').value,
+    date: document.getElementById('rdvDate').value || selectedDate,
+    statut: 'planifie',
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  }).then(function() {
+    closeModal('modalRdv');
+    document.getElementById('rdvProspect').value = '';
+    document.getElementById('rdvAdresse').value = '';
+    document.getElementById('rdvTel').value = '';
+    loadAgenda(); loadHome();
+    showToast('RDV ajouté ✅');
+  });
+}
+
+// ══════════════════════════════════════
+// PHOTOS
+// ══════════════════════════════════════
+var photosData = [null,null,null,null,null,null];
+var photosUrls = [null,null,null,null,null,null];
+var photoDevis = null; var photoDevisUrl = null;
+var photoAcompte = null; var photoAcompteUrl = null;
+
+function calcTTC() {
+  var ht = parseFloat(document.getElementById('rapportMontantHT').value) || 0;
+  var tva = parseFloat(document.getElementById('rapportTVA').value) || 5.5;
+  if(ht > 0) {
+    document.getElementById('rapportMontantTTC').value = (ht * (1 + tva/100)).toFixed(2);
+  }
+}
+
+function addPhotoDoc(type, input) {
+  if(!input.files || !input.files[0]) return;
+  var slotId = type === 'devis' ? 'slotDevis' : 'slotAcompte';
+  var slot = document.getElementById(slotId);
+  slot.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:0.65rem;color:#888;">⏳ Upload...</div>';
+  compressImage(input.files[0], function(blob, preview) {
+    slot.classList.add('filled'); slot.innerHTML = '';
+    var img = document.createElement('img'); img.src = preview;
+    slot.appendChild(img);
+    var removeBtn = document.createElement('button');
+    removeBtn.className = 'photo-remove'; removeBtn.textContent = '✕';
+    removeBtn.addEventListener('click', function(ev) {
+      ev.preventDefault(); ev.stopPropagation();
+      if(type==='devis') { photoDevis=null; photoDevisUrl=null; }
+      else { photoAcompte=null; photoAcompteUrl=null; }
+      slot.classList.remove('filled'); slot.innerHTML = '';
+      var label = type==='devis' ? 'Photo devis' : 'Photo acompte';
+      var icon = type==='devis' ? '📄' : '💳';
+      slot.innerHTML = '<span class="photo-add-icon">'+icon+'</span><span class="photo-add-label">'+label+'</span><input type="file" accept="image/*" capture="environment" onchange="addPhotoDoc(\''+type+'\',this)">';
+    });
+    slot.appendChild(removeBtn);
+    uploadToCloudinary(blob, function(url) {
+      if(type==='devis') { photoDevis=preview; photoDevisUrl=url; }
+      else { photoAcompte=preview; photoAcompteUrl=url; }
+      showToast(type==='devis' ? 'Devis sauvegardé ✅' : 'Acompte sauvegardé ✅');
+    }, function() { showToast('Erreur upload ' + type); });
+  });
+}
+
+function compressImage(file, callback) {
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      var canvas = document.createElement('canvas');
+      var MAX = 800;
+      var w = img.width, h = img.height;
+      if(w > MAX) { h = h * MAX/w; w = MAX; }
+      if(h > MAX) { w = w * MAX/h; h = MAX; }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      canvas.toBlob(function(blob) { callback(blob, canvas.toDataURL('image/jpeg', 0.7)); }, 'image/jpeg', 0.7);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function uploadToCloudinary(blob, onSuccess, onError) {
+  var fd = new FormData();
+  fd.append('file', blob);
+  fd.append('upload_preset', CLOUDINARY_PRESET);
+  fd.append('folder', 'batel-rapports');
+  fetch(CLOUDINARY_URL, { method: 'POST', body: fd })
+    .then(function(r){ return r.json(); })
+    .then(function(data){ if(data.secure_url) onSuccess(data.secure_url); else onError(); })
+    .catch(onError);
+}
+
+function addPhoto(index, input) {
+  if(!input.files || !input.files[0]) return;
+  var slot = document.getElementById('slot' + index);
+  slot.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:0.65rem;color:#888;">⏳ Upload...</div>';
+  compressImage(input.files[0], function(blob, preview) {
+    // Aperçu immédiat
+    photosData[index] = preview;
+    slot.classList.add('filled');
+    slot.innerHTML = '';
+    var img = document.createElement('img');
+    img.src = preview;
+    slot.appendChild(img);
+    var removeBtn = document.createElement('button');
+    removeBtn.className = 'photo-remove'; removeBtn.textContent = '✕';
+    removeBtn.addEventListener('click', function(ev) {
+      ev.preventDefault(); ev.stopPropagation();
+      photosData[index] = null; photosUrls[index] = null;
+      slot.classList.remove('filled'); slot.innerHTML = '';
+      slot.innerHTML = '<span class="photo-add-icon">📷</span><span class="photo-add-label">Photo ' + (index+1) + '</span><input type="file" accept="image/*" capture="environment" onchange="addPhoto(' + index + ',this)">';
+    });
+    slot.appendChild(removeBtn);
+    // Upload Cloudinary en arrière-plan
+    uploadToCloudinary(blob, function(url) {
+      photosUrls[index] = url;
+      showToast('Photo ' + (index+1) + ' sauvegardée ✅');
+    }, function() {
+      showToast('Erreur upload photo ' + (index+1));
+    });
+  });
+}
+
+function resetPhotos() {
+  photosData = [null,null,null,null,null,null];
+  photoDevis = null; photoDevisUrl = null; photoAcompte = null; photoAcompteUrl = null;
+  photosUrls = [null,null,null,null,null,null];
+  ['slotDevis','slotAcompte'].forEach(function(sid) {
+    var sl = document.getElementById(sid);
+    if(!sl) return;
+    sl.classList.remove('filled');
+    var im = sl.querySelector('img'); if(im) im.remove();
+    var bt = sl.querySelector('.photo-remove'); if(bt) bt.remove();
+    var ip = sl.querySelector('input'); if(ip) ip.value = '';
+  });
+  for(var i=0;i<6;i++) {
+    var slot = document.getElementById('slot'+i);
+    slot.classList.remove('filled');
+    var img = slot.querySelector('img');
+    if(img) img.remove();
+    var btn = slot.querySelector('.photo-remove');
+    if(btn) btn.remove();
+    var inp = slot.querySelector('input');
+    if(inp) inp.value = '';
+  }
+}
+
+// ══════════════════════════════════════
+// RAPPORT
+// ══════════════════════════════════════
+
+function saveRapport() {
+  if(!currentUser) return;
+  currentRdvId = window._currentRdvId || currentRdvId;
+  currentRdvProspect = window._currentRdvProspect || currentRdvProspect;
+  var statut = document.getElementById('rapportStatut').value;
+  var type = document.getElementById('rapportType').value;
+
+  var obs = document.getElementById('rapportObs').value;
+  var nextDate = document.getElementById('rapportNextDate').value;
+  var nextHeure = document.getElementById('rapportNextHeure').value;
+
+  var data = {
+    prospect: currentRdvProspect,
+    statut: statut, type: type, obs: obs,
+    date: selectedDate, nextDate: nextDate, nextHeure: nextHeure,
+    vendeur: currentVendeur ? currentVendeur.nom : '',
+    montantHT: parseFloat(document.getElementById('rapportMontantHT').value) || 0,
+    tva: parseFloat(document.getElementById('rapportTVA').value) || 5.5,
+    montantTTC: parseFloat(document.getElementById('rapportMontantTTC').value) || 0,
+    nbPhotos: photosUrls.filter(function(u){ return u !== null; }).length,
+    photosUrls: photosUrls.filter(function(u){ return u !== null; }),
+    photoDevisUrl: photoDevisUrl || null,
+    photoAcompteUrl: photoAcompteUrl || null,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  db.collection('vendeurs').doc(currentUser.uid).collection('rapports').add(data).then(function() {
+    if(currentRdvId) {
+      db.collection('vendeurs').doc(currentUser.uid).collection('rdvs').doc(currentRdvId).update({ statut: statut });
+    }
+    if(nextDate && nextHeure) {
+      db.collection('vendeurs').doc(currentUser.uid).collection('rdvs').add({
+        prospect: currentRdvProspect, heure: nextHeure, date: nextDate,
+        type: type, statut: 'planifie', createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+    var webhook = localStorage.getItem('makeWebhook') || MAKE_WEBHOOK;
+    if(webhook) {
+      fetch(webhook, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data) }).catch(function(){});
+    }
+    closeModal('modalRapport');
+    loadHome(); loadRdvsDate(selectedDate);
+    showToast('Rapport enregistré ✅');
+  });
+}
+
+// ══════════════════════════════════════
+// HISTORIQUE
+// ══════════════════════════════════════
+function loadHistorique() {
+  if(!currentUser) return;
+  db.collection('vendeurs').doc(currentUser.uid).collection('rapports')
+    .get().then(function(snap) {
+      var list = document.getElementById('historiqueList');
+      list.innerHTML = '';
+      if(snap.empty) { list.innerHTML = '<div class="empty-state">Aucun rapport encore</div>'; return; }
+      var colors = {signe:'#00C853',visite:'#F5A800',relance:'#FF9800',perdu:'#FF5252',planifie:'#888'};
+      var labels = {signe:'Signé',visite:'Visité',relance:'Relance',perdu:'Perdu',planifie:'Planifié'};
+      snap.forEach(function(d) {
+        var r = d.data();
+        var c = colors[r.statut] || '#888';
+        var card = document.createElement('div');
+        card.className = 'histo-card';
+        var montantInfo = r.montantTTC ? '<div class="histo-montant">💰 TTC: ' + parseFloat(r.montantTTC).toLocaleString('fr-FR') + '€</div>' : '';
+        card.innerHTML = '<div class="histo-header">'
+          + '<div><div class="histo-name">' + (r.prospect||'') + '</div>'
+          + '<div class="histo-meta">' + (r.date||'') + ' · ' + (r.type||'').toUpperCase() + '</div></div>'
+          + '<div style="display:flex;align-items:center;gap:6px;">'
+          + '<span class="badge" style="background:' + c + '20;color:' + c + '">' + (labels[r.statut]||r.statut) + '</span>'
+          + '<button class="btn-icon" onclick="voirRapport(&apos;' + d.id + '&apos;)">👁</button>'
+          + '</div></div>'
+          + (r.obs ? '<div class="histo-obs">' + r.obs + '</div>' : '')
+          + montantInfo;
+        list.appendChild(card);
+      });
+    });
+}
+
+// ══════════════════════════════════════
+// PROFIL
+// ══════════════════════════════════════
+function loadProfil() {
+  if(!currentVendeur) return;
+  document.getElementById('profilNom').value = currentVendeur.nom || '';
+  document.getElementById('profilZone').value = currentVendeur.zone || 'Gironde';
+  document.getElementById('profilEmail').textContent = currentUser ? currentUser.email : '';
+  document.getElementById('profilNomDisplay').textContent = currentVendeur.nom || '';
+  document.getElementById('profilWebhook').value = localStorage.getItem('makeWebhook') || MAKE_WEBHOOK;
+}
+
+function saveProfil() {
+  var nom = document.getElementById('profilNom').value.trim();
+  var zone = document.getElementById('profilZone').value.trim();
+  var webhook = document.getElementById('profilWebhook').value.trim();
+  if(!nom) { showToast('Renseignez votre nom'); return; }
+  db.collection('vendeurs').doc(currentUser.uid).update({ nom: nom, zone: zone }).then(function() {
+    currentVendeur.nom = nom; currentVendeur.zone = zone;
+    document.getElementById('navUserName').textContent = nom;
+    document.getElementById('homeUserName').textContent = nom.split(' ')[0];
+    if(webhook) localStorage.setItem('makeWebhook', webhook);
+    showToast('Profil mis à jour ✅');
+  });
+}
+
+// ══════════════════════════════════════
+// VOIR / MODIFIER RAPPORT
+// ══════════════════════════════════════
+var currentRapportId = null;
+var editionActive = false;
+
+function voirRapport(id) {
+  currentRapportId = id;
+  editionActive = false;
+  db.collection('vendeurs').doc(currentUser.uid).collection('rapports').doc(id).get().then(function(snap) {
+    if(!snap.exists) { showToast('Rapport introuvable'); return; }
+    var r = snap.data();
+    document.getElementById('voirRapportProspect').textContent = r.prospect || 'Prospect';
+    document.getElementById('voirStatut').value = r.statut || 'visite';
+    document.getElementById('voirType').value = r.type || 'pac';
+    document.getElementById('voirTVA').value = r.tva || '5.5';
+    document.getElementById('voirMontantHT').value = r.montantHT || '';
+    document.getElementById('voirMontantTTC').value = r.montantTTC || '';
+    document.getElementById('voirObs').value = r.obs || '';
+    document.getElementById('voirDate').value = r.date || '';
+    // Afficher photos existantes
+    var photosContainer = document.getElementById('voirPhotosContainer');
+    if(photosContainer) {
+      photosContainer.innerHTML = '';
+      var urls = r.photosUrls || [];
+      if(r.photoDevisUrl) urls = urls.concat([{url: r.photoDevisUrl, label: 'Devis'}]);
+      if(r.photoAcompteUrl) urls = urls.concat([{url: r.photoAcompteUrl, label: 'Acompte'}]);
+      if(urls.length === 0) {
+        photosContainer.innerHTML = '<div style="font-size:0.75rem;color:var(--text3);text-align:center;padding:10px;">Aucune photo</div>';
+      } else {
+        urls.forEach(function(u) {
+          var src = typeof u === 'string' ? u : u.url;
+          var lbl = typeof u === 'object' ? u.label : '';
+          photosContainer.innerHTML += '<div style="position:relative;"><img src="' + src + '" style="width:100%;border-radius:10px;object-fit:cover;aspect-ratio:1;" onclick="window.open(this.src)"><div style="font-size:0.6rem;text-align:center;color:var(--text2);margin-top:2px;">' + lbl + '</div></div>';
+        });
+      }
+    }
+    // Statut boutons
+    document.querySelectorAll('#voirStatusBtns .status-btn').forEach(function(b){ b.classList.remove('sel'); });
+    var selBtn = document.querySelector('#voirStatusBtns [data-val="' + (r.statut||'visite') + '"]');
+    if(selBtn) selBtn.classList.add('sel');
+    // Mode lecture
+    setEditionMode(false);
+    openModal('modalVoirRapport');
+  });
+}
+
+function setEditionMode(active) {
+  editionActive = active;
+  var inputs = document.querySelectorAll('#modalVoirRapport input, #modalVoirRapport textarea, #modalVoirRapport select');
+  inputs.forEach(function(el){ el.disabled = !active; el.style.opacity = active ? '1' : '0.7'; });
+  document.getElementById('voirSaveBtn').style.display = active ? 'block' : 'none';
+}
+
+function activerEdition() {
+  setEditionMode(true);
+  showToast('Mode édition activé ✏️');
+}
+
+function setVoirStatut(btn, val) {
+  if(!editionActive) return;
+  document.querySelectorAll('#voirStatusBtns .status-btn').forEach(function(b){ b.classList.remove('sel'); });
+  btn.classList.add('sel');
+  document.getElementById('voirStatut').value = val;
+}
+
+function calcVoirTTC() {
+  var ht = parseFloat(document.getElementById('voirMontantHT').value) || 0;
+  var tva = parseFloat(document.getElementById('voirTVA').value) || 5.5;
+  if(ht > 0) document.getElementById('voirMontantTTC').value = (ht * (1 + tva/100)).toFixed(2);
+}
+
+function sauvegarderModif() {
+  if(!currentRapportId) return;
+  var data = {
+    statut: document.getElementById('voirStatut').value,
+    type: document.getElementById('voirType').value,
+    tva: parseFloat(document.getElementById('voirTVA').value) || 5.5,
+    montantHT: parseFloat(document.getElementById('voirMontantHT').value) || 0,
+    montantTTC: parseFloat(document.getElementById('voirMontantTTC').value) || 0,
+    obs: document.getElementById('voirObs').value,
+    date: document.getElementById('voirDate').value
+  };
+  db.collection('vendeurs').doc(currentUser.uid).collection('rapports').doc(currentRapportId).update(data).then(function() {
+    closeModal('modalVoirRapport');
+    loadHistorique();
+    loadHome();
+    showToast('Rapport modifié ✅');
+  });
+}
+
+function supprimerRapport() {
+  if(!currentRapportId) return;
+  if(!confirm('Supprimer ce rapport définitivement ?')) return;
+  db.collection('vendeurs').doc(currentUser.uid).collection('rapports').doc(currentRapportId).delete().then(function() {
+    closeModal('modalVoirRapport');
+    loadHistorique();
+    loadHome();
+    showToast('Rapport supprimé');
+  });
+}
+
+// ══ EXPOSER TOUTES LES FONCTIONS SUR WINDOW ══
+window._fbAuth = auth;
+window._fbDb = db;
+window._goTo = goTo;
+window._saveRdv = saveRdv;
+window._saveRapport = saveRapport;
+window._saveProfil = saveProfil;
+window._openRapport = openRapport;
+window._deleteRdv = deleteRdv;
+window._calcTTC = calcTTC;
+window._addPhoto = addPhoto;
+window._addPhotoDoc = addPhotoDoc;
+window._resetPhotos = resetPhotos;
+window.voirRapport = voirRapport;
+window.activerEdition = activerEdition;
+window.setVoirStatut = setVoirStatut;
+window.calcVoirTTC = calcVoirTTC;
+window.sauvegarderModif = sauvegarderModif;
+window.supprimerRapport = supprimerRapport;
+
+</script>
